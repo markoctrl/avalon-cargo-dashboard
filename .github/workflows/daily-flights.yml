@@ -1,0 +1,45 @@
+name: Daily Cargo Flight Collection
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  collect-flights:
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python packages
+        run: |
+          pip install requests
+
+      - name: Collect flights
+        env:
+          OPENSKY_CLIENT_ID: ${{ secrets.OPENSKY_CLIENT_ID }}
+          OPENSKY_CLIENT_SECRET: ${{ secrets.OPENSKY_CLIENT_SECRET }}
+        run: |
+          python collect_flights.py
+
+      - name: Commit flight data
+        run: |
+          git config user.name "Avalon Cargo Bot"
+          git config user.email "actions@github.com"
+
+          git add data/movements.csv
+
+          git diff --cached --quiet || git commit -m "Update flight movements"
+
+          git push
