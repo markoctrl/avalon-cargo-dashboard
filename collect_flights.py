@@ -1,5 +1,6 @@
 import os
 import csv
+import re
 import requests
 
 from datetime import datetime, timedelta, timezone
@@ -34,6 +35,7 @@ MELBOURNE_TZ = ZoneInfo("Australia/Melbourne")
 # =========================================
 
 def get_access_token():
+
     client_id = os.environ["OPENSKY_CLIENT_ID"]
     client_secret = os.environ["OPENSKY_CLIENT_SECRET"]
 
@@ -57,6 +59,7 @@ def get_access_token():
 # =========================================
 
 def get_yesterday_timestamps():
+
     now = datetime.now(MELBOURNE_TZ)
 
     yesterday = now.date() - timedelta(days=1)
@@ -87,6 +90,7 @@ def get_yesterday_timestamps():
 # =========================================
 
 def unix_to_melbourne(timestamp):
+
     if not timestamp:
         return ""
 
@@ -103,6 +107,7 @@ def unix_to_melbourne(timestamp):
 # =========================================
 
 def get_flights(token, airport, direction, begin, end):
+
     if direction == "Arrival":
         endpoint = "flights/arrival"
     else:
@@ -136,6 +141,7 @@ def get_flights(token, airport, direction, begin, end):
 # =========================================
 
 def get_aircraft_details(icao24, callsign=None):
+
     if not icao24:
         return {}
 
@@ -147,6 +153,7 @@ def get_aircraft_details(icao24, callsign=None):
         params["callsign"] = callsign
 
     try:
+
         response = requests.get(
             url,
             params=params,
@@ -154,7 +161,9 @@ def get_aircraft_details(icao24, callsign=None):
         )
 
         if response.status_code == 404:
-            print(f"ADSBDB: aircraft not found: {icao24}")
+            print(
+                f"ADSBDB: aircraft not found: {icao24}"
+            )
             return {}
 
         response.raise_for_status()
@@ -168,9 +177,12 @@ def get_aircraft_details(icao24, callsign=None):
         )
 
     except requests.RequestException as error:
+
         print(
-            f"ADSBDB lookup failed for {icao24}: {error}"
+            f"ADSBDB lookup failed for "
+            f"{icao24}: {error}"
         )
+
         return {}
 
 
@@ -184,14 +196,16 @@ def classify_cargo(
     icao_type,
     callsign
 ):
-    operator_text = (operator or "").upper()
-    aircraft_text = (aircraft_type or "").upper()
-    icao_text = (icao_type or "").upper()
-    callsign_text = (callsign or "").upper()
 
-    # -------------------------------------
-    # KNOWN CARGO OPERATORS
-    # -------------------------------------
+    operator_text = (operator or "").upper().strip()
+    aircraft_text = (aircraft_type or "").upper().strip()
+    icao_text = (icao_type or "").upper().strip()
+    callsign_text = (callsign or "").upper().strip()
+
+
+    # =====================================
+    # 1. KNOWN CARGO OPERATORS
+    # =====================================
 
     known_cargo_operators = [
         "QANTAS FREIGHT",
@@ -206,16 +220,24 @@ def classify_cargo(
     ]
 
     for cargo_operator in known_cargo_operators:
+
         if cargo_operator in operator_text:
+
             return {
-                "classification": "Dedicated Freighter",
-                "confidence": "High",
-                "reason": f"Known cargo operator: {operator}"
+                "classification":
+                    "Dedicated Freighter",
+
+                "confidence":
+                    "High",
+
+                "reason":
+                    f"Known cargo operator: {operator}"
             }
 
-    # -------------------------------------
-    # SPECIAL MISSION / NON-CARGO
-    # -------------------------------------
+
+    # =====================================
+    # 2. SPECIAL MISSION
+    # =====================================
 
     special_mission_keywords = [
         "AMBULANCE",
@@ -230,16 +252,25 @@ def classify_cargo(
     ]
 
     for keyword in special_mission_keywords:
+
         if keyword in operator_text:
+
             return {
-                "classification": "Special Mission",
-                "confidence": "High",
-                "reason": f"Special mission operator: {operator}"
+                "classification":
+                    "Special Mission",
+
+                "confidence":
+                    "High",
+
+                "reason":
+                    f"Special mission operator: {operator}"
             }
 
-    # -------------------------------------
-    # AIRCRAFT DESCRIPTION SAYS CARGO
-    # -------------------------------------
+
+    # =====================================
+    # 3. AIRCRAFT DESCRIPTION EXPLICITLY
+    #    IDENTIFIES A FREIGHTER
+    # =====================================
 
     freighter_keywords = [
         "FREIGHTER",
@@ -247,16 +278,60 @@ def classify_cargo(
     ]
 
     for keyword in freighter_keywords:
+
         if keyword in aircraft_text:
+
             return {
-                "classification": "Dedicated Freighter",
-                "confidence": "High",
-                "reason": f"Aircraft described as {aircraft_type}"
+                "classification":
+                    "Dedicated Freighter",
+
+                "confidence":
+                    "High",
+
+                "reason":
+                    (
+                        "Aircraft description "
+                        f"indicates freighter: "
+                        f"{aircraft_type}"
+                    )
             }
 
-    # -------------------------------------
-    # CARGO CALLSIGN PREFIXES
-    # -------------------------------------
+
+    # =====================================
+    # 4. FREIGHTER AIRCRAFT VARIANT
+    #
+    # Examples:
+    # 747-412F
+    # 767-300F
+    # A330-200F
+    # 747-400ERF
+    # =====================================
+
+    if aircraft_text:
+
+        if re.search(
+            r"(F|ERF)$",
+            aircraft_text
+        ):
+
+            return {
+                "classification":
+                    "Dedicated Freighter",
+
+                "confidence":
+                    "High",
+
+                "reason":
+                    (
+                        "Aircraft variant indicates "
+                        f"freighter: {aircraft_type}"
+                    )
+            }
+
+
+    # =====================================
+    # 5. CARGO CALLSIGN PREFIX
+    # =====================================
 
     cargo_callsign_prefixes = [
         "FDX",
@@ -264,17 +339,27 @@ def classify_cargo(
     ]
 
     for prefix in cargo_callsign_prefixes:
+
         if callsign_text.startswith(prefix):
+
             return {
-                "classification": "Dedicated Freighter",
-                "confidence": "High",
-                "reason": f"Cargo callsign prefix: {prefix}"
+                "classification":
+                    "Dedicated Freighter",
+
+                "confidence":
+                    "High",
+
+                "reason":
+                    f"Cargo callsign prefix: {prefix}"
             }
 
-    # -------------------------------------
-    # AIRCRAFT TYPES COMMONLY USED AS
-    # FREIGHTERS, BUT NOT ALWAYS
-    # -------------------------------------
+
+    # =====================================
+    # 6. AIRCRAFT TYPES COMMONLY USED
+    #    FOR FREIGHT
+    #
+    # These do NOT prove cargo configuration.
+    # =====================================
 
     possible_freighter_types = [
         "B77L",
@@ -287,18 +372,27 @@ def classify_cargo(
     ]
 
     if icao_text in possible_freighter_types:
+
         return {
-            "classification": "Possible Cargo",
-            "confidence": "Medium",
-            "reason": (
-                f"Aircraft type {icao_type} is commonly used "
-                "for cargo operations, but configuration is not confirmed"
-            )
+            "classification":
+                "Possible Cargo",
+
+            "confidence":
+                "Medium",
+
+            "reason":
+                (
+                    f"Aircraft type {icao_type} "
+                    "is commonly used for cargo "
+                    "operations, but configuration "
+                    "is not confirmed"
+                )
         }
 
-    # -------------------------------------
-    # KNOWN PASSENGER OPERATORS
-    # -------------------------------------
+
+    # =====================================
+    # 7. KNOWN PASSENGER OPERATORS
+    # =====================================
 
     known_passenger_operators = [
         "JETSTAR",
@@ -307,24 +401,41 @@ def classify_cargo(
     ]
 
     for passenger_operator in known_passenger_operators:
+
         if passenger_operator in operator_text:
+
             return {
-                "classification": "Passenger / Non-Cargo",
-                "confidence": "Medium",
-                "reason": (
-                    f"Registered operator appears to be "
-                    f"passenger airline: {operator}"
-                )
+                "classification":
+                    "Passenger / Non-Cargo",
+
+                "confidence":
+                    "Medium",
+
+                "reason":
+                    (
+                        "Registered operator appears "
+                        f"to be passenger airline: "
+                        f"{operator}"
+                    )
             }
 
-    # -------------------------------------
-    # UNKNOWN
-    # -------------------------------------
+
+    # =====================================
+    # 8. UNKNOWN
+    # =====================================
 
     return {
-        "classification": "Unknown",
-        "confidence": "Low",
-        "reason": "No strong cargo or non-cargo indicator found"
+        "classification":
+            "Unknown",
+
+        "confidence":
+            "Low",
+
+        "reason":
+            (
+                "No strong cargo or non-cargo "
+                "indicator found"
+            )
     }
 
 
@@ -334,7 +445,11 @@ def classify_cargo(
 
 def main():
 
-    print("Starting Avalon Cargo flight collection")
+    print(
+        "Starting Avalon Cargo "
+        "flight collection"
+    )
+
 
     # -------------------------------------
     # Authenticate to OpenSky
@@ -346,47 +461,71 @@ def main():
 
     print("Authentication successful")
 
+
     # -------------------------------------
     # Determine yesterday
     # -------------------------------------
 
-    yesterday, begin, end = get_yesterday_timestamps()
+    yesterday, begin, end = (
+        get_yesterday_timestamps()
+    )
 
-    print(f"Collecting flights for: {yesterday}")
-    print(f"Unix start: {begin}")
-    print(f"Unix end:   {end}")
+    print(
+        f"Collecting flights for: "
+        f"{yesterday}"
+    )
+
+    print(
+        f"Unix start: {begin}"
+    )
+
+    print(
+        f"Unix end:   {end}"
+    )
+
 
     # -------------------------------------
-    # Store all rows here
+    # Store all rows
     # -------------------------------------
 
     rows = []
 
+
     # -------------------------------------
     # Aircraft cache
     #
-    # Prevent repeated ADSBDB calls for
-    # the same aircraft during the run
+    # Avoid repeated ADSBDB calls for the
+    # same aircraft during this run.
     # -------------------------------------
 
     aircraft_cache = {}
 
-    # -------------------------------------
-    # Loop through airports
-    # -------------------------------------
 
-    for airport_code, airport_name in AIRPORTS.items():
+    # =====================================
+    # LOOP THROUGH AIRPORTS
+    # =====================================
+
+    for (
+        airport_code,
+        airport_name
+    ) in AIRPORTS.items():
+
 
         # ---------------------------------
-        # Arrivals and departures
+        # ARRIVALS + DEPARTURES
         # ---------------------------------
 
-        for direction in ["Arrival", "Departure"]:
+        for direction in [
+            "Arrival",
+            "Departure"
+        ]:
 
             print()
+
             print(
-                f"Collecting {direction}s for "
-                f"{airport_code} - {airport_name}"
+                f"Collecting {direction}s "
+                f"for {airport_code} - "
+                f"{airport_name}"
             )
 
             flights = get_flights(
@@ -397,67 +536,94 @@ def main():
                 end=end
             )
 
-            print(f"Found {len(flights)} flights")
+            print(
+                f"Found {len(flights)} "
+                f"flights"
+            )
 
-            # -----------------------------
-            # Process each flight
-            # -----------------------------
+
+            # =============================
+            # PROCESS EACH FLIGHT
+            # =============================
 
             for flight in flights:
 
                 icao24 = (
-                    flight.get("icao24") or ""
+                    flight.get(
+                        "icao24"
+                    ) or ""
                 ).lower()
 
                 callsign = (
-                    flight.get("callsign") or ""
+                    flight.get(
+                        "callsign"
+                    ) or ""
                 ).strip()
 
+
                 # -------------------------
-                # ADSBDB lookup
+                # ADSBDB LOOKUP
                 # -------------------------
 
                 aircraft = {}
 
                 if icao24:
 
-                    if icao24 in aircraft_cache:
-                        aircraft = aircraft_cache[icao24]
+                    if (
+                        icao24
+                        in aircraft_cache
+                    ):
+
+                        aircraft = (
+                            aircraft_cache[
+                                icao24
+                            ]
+                        )
 
                     else:
 
                         print(
-                            f"Looking up aircraft "
+                            "Looking up aircraft "
                             f"{icao24} "
                             f"{callsign}"
                         )
 
-                        aircraft = get_aircraft_details(
-                            icao24,
-                            callsign
+                        aircraft = (
+                            get_aircraft_details(
+                                icao24,
+                                callsign
+                            )
                         )
 
-                        aircraft_cache[icao24] = aircraft
+                        aircraft_cache[
+                            icao24
+                        ] = aircraft
+
 
                 # -------------------------
                 # CARGO CLASSIFICATION
                 # -------------------------
 
                 cargo_result = classify_cargo(
+
                     operator=aircraft.get(
                         "registered_owner"
                     ),
+
                     aircraft_type=aircraft.get(
                         "type"
                     ),
+
                     icao_type=aircraft.get(
                         "icao_type"
                     ),
+
                     callsign=callsign
                 )
 
+
                 # -------------------------
-                # OpenSky timestamps
+                # TIMESTAMPS
                 # -------------------------
 
                 first_seen = flight.get(
@@ -468,9 +634,10 @@ def main():
                     "lastSeen"
                 )
 
-                # -------------------------
-                # Build row
-                # -------------------------
+
+                # =========================
+                # BUILD OUTPUT ROW
+                # =========================
 
                 rows.append({
 
@@ -584,13 +751,16 @@ def main():
                         "OpenSky + ADSBDB"
                 })
 
+
     # =====================================
     # WRITE CSV
     # =====================================
 
     print()
+
     print(
-        f"Total movements collected: {len(rows)}"
+        "Total movements collected: "
+        f"{len(rows)}"
     )
 
     os.makedirs(
@@ -598,33 +768,47 @@ def main():
         exist_ok=True
     )
 
+
     fieldnames = [
+
         "CaptureDate",
         "FlightDate",
+
         "Airport",
         "AirportName",
+
         "Direction",
+
         "ICAO24",
         "Callsign",
+
         "OriginAirport",
         "DestinationAirport",
+
         "FirstSeenUnix",
         "LastSeenUnix",
+
         "FirstSeenLocal",
         "LastSeenLocal",
+
         "DepartureAirportDistance",
         "ArrivalAirportDistance",
+
         "Registration",
         "Manufacturer",
         "AircraftType",
         "ICAOType",
+
         "Operator",
         "OperatorCountry",
+
         "CargoClassification",
         "CargoConfidence",
         "ClassificationReason",
+
         "Source"
     ]
+
 
     with open(
         OUTPUT_FILE,
@@ -640,14 +824,17 @@ def main():
 
         writer.writeheader()
 
-        writer.writerows(rows)
+        writer.writerows(
+            rows
+        )
+
 
     print(
         f"Saved to {OUTPUT_FILE}"
     )
 
     print(
-        f"Unique aircraft looked up: "
+        "Unique aircraft looked up: "
         f"{len(aircraft_cache)}"
     )
 
