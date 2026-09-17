@@ -171,8 +171,161 @@ def get_aircraft_details(icao24, callsign=None):
         print(
             f"ADSBDB lookup failed for {icao24}: {error}"
         )
-
         return {}
+
+
+# =========================================
+# CARGO CLASSIFICATION
+# =========================================
+
+def classify_cargo(
+    operator,
+    aircraft_type,
+    icao_type,
+    callsign
+):
+    operator_text = (operator or "").upper()
+    aircraft_text = (aircraft_type or "").upper()
+    icao_text = (icao_type or "").upper()
+    callsign_text = (callsign or "").upper()
+
+    # -------------------------------------
+    # KNOWN CARGO OPERATORS
+    # -------------------------------------
+
+    known_cargo_operators = [
+        "QANTAS FREIGHT",
+        "FEDERAL EXPRESS",
+        "FEDEX",
+        "DHL",
+        "UPS",
+        "UNITED PARCEL SERVICE",
+        "TOLL",
+        "TEAM GLOBAL EXPRESS",
+        "STARTRACK"
+    ]
+
+    for cargo_operator in known_cargo_operators:
+        if cargo_operator in operator_text:
+            return {
+                "classification": "Dedicated Freighter",
+                "confidence": "High",
+                "reason": f"Known cargo operator: {operator}"
+            }
+
+    # -------------------------------------
+    # SPECIAL MISSION / NON-CARGO
+    # -------------------------------------
+
+    special_mission_keywords = [
+        "AMBULANCE",
+        "POLICE",
+        "DEFENCE",
+        "DEFENSE",
+        "AIR FORCE",
+        "NAVY",
+        "ARMY",
+        "RESCUE",
+        "EMERGENCY"
+    ]
+
+    for keyword in special_mission_keywords:
+        if keyword in operator_text:
+            return {
+                "classification": "Special Mission",
+                "confidence": "High",
+                "reason": f"Special mission operator: {operator}"
+            }
+
+    # -------------------------------------
+    # AIRCRAFT DESCRIPTION SAYS CARGO
+    # -------------------------------------
+
+    freighter_keywords = [
+        "FREIGHTER",
+        "CARGO"
+    ]
+
+    for keyword in freighter_keywords:
+        if keyword in aircraft_text:
+            return {
+                "classification": "Dedicated Freighter",
+                "confidence": "High",
+                "reason": f"Aircraft described as {aircraft_type}"
+            }
+
+    # -------------------------------------
+    # CARGO CALLSIGN PREFIXES
+    # -------------------------------------
+
+    cargo_callsign_prefixes = [
+        "FDX",
+        "UPS"
+    ]
+
+    for prefix in cargo_callsign_prefixes:
+        if callsign_text.startswith(prefix):
+            return {
+                "classification": "Dedicated Freighter",
+                "confidence": "High",
+                "reason": f"Cargo callsign prefix: {prefix}"
+            }
+
+    # -------------------------------------
+    # AIRCRAFT TYPES COMMONLY USED AS
+    # FREIGHTERS, BUT NOT ALWAYS
+    # -------------------------------------
+
+    possible_freighter_types = [
+        "B77L",
+        "B748",
+        "B744",
+        "B763",
+        "B752",
+        "A306",
+        "A332"
+    ]
+
+    if icao_text in possible_freighter_types:
+        return {
+            "classification": "Possible Cargo",
+            "confidence": "Medium",
+            "reason": (
+                f"Aircraft type {icao_type} is commonly used "
+                "for cargo operations, but configuration is not confirmed"
+            )
+        }
+
+    # -------------------------------------
+    # KNOWN PASSENGER OPERATORS
+    # -------------------------------------
+
+    known_passenger_operators = [
+        "JETSTAR",
+        "VIRGIN AUSTRALIA",
+        "QANTAS AIRWAYS"
+    ]
+
+    for passenger_operator in known_passenger_operators:
+        if passenger_operator in operator_text:
+            return {
+                "classification": "Passenger / Non-Cargo",
+                "confidence": "Medium",
+                "reason": (
+                    f"Registered operator appears to be "
+                    f"passenger airline: {operator}"
+                )
+            }
+
+    # -------------------------------------
+    # UNKNOWN
+    # -------------------------------------
+
+    return {
+        "classification": "Unknown",
+        "confidence": "Low",
+        "reason": "No strong cargo or non-cargo indicator found"
+    }
 
 
 # =========================================
@@ -193,7 +346,6 @@ def main():
 
     print("Authentication successful")
 
-
     # -------------------------------------
     # Determine yesterday
     # -------------------------------------
@@ -204,23 +356,20 @@ def main():
     print(f"Unix start: {begin}")
     print(f"Unix end:   {end}")
 
-
     # -------------------------------------
     # Store all rows here
     # -------------------------------------
 
     rows = []
 
-
     # -------------------------------------
     # Aircraft cache
     #
-    # Prevents repeated ADSBDB calls for
-    # the same aircraft during this run
+    # Prevent repeated ADSBDB calls for
+    # the same aircraft during the run
     # -------------------------------------
 
     aircraft_cache = {}
-
 
     # -------------------------------------
     # Loop through airports
@@ -250,7 +399,6 @@ def main():
 
             print(f"Found {len(flights)} flights")
 
-
             # -----------------------------
             # Process each flight
             # -----------------------------
@@ -265,7 +413,6 @@ def main():
                     flight.get("callsign") or ""
                 ).strip()
 
-
                 # -------------------------
                 # ADSBDB lookup
                 # -------------------------
@@ -275,10 +422,7 @@ def main():
                 if icao24:
 
                     if icao24 in aircraft_cache:
-
-                        aircraft = aircraft_cache[
-                            icao24
-                        ]
+                        aircraft = aircraft_cache[icao24]
 
                     else:
 
@@ -293,10 +437,24 @@ def main():
                             callsign
                         )
 
-                        aircraft_cache[
-                            icao24
-                        ] = aircraft
+                        aircraft_cache[icao24] = aircraft
 
+                # -------------------------
+                # CARGO CLASSIFICATION
+                # -------------------------
+
+                cargo_result = classify_cargo(
+                    operator=aircraft.get(
+                        "registered_owner"
+                    ),
+                    aircraft_type=aircraft.get(
+                        "type"
+                    ),
+                    icao_type=aircraft.get(
+                        "icao_type"
+                    ),
+                    callsign=callsign
+                )
 
                 # -------------------------
                 # OpenSky timestamps
@@ -309,7 +467,6 @@ def main():
                 last_seen = flight.get(
                     "lastSeen"
                 )
-
 
                 # -------------------------
                 # Build row
@@ -408,10 +565,24 @@ def main():
                             "registered_owner_country_name"
                         ) or "",
 
+                    "CargoClassification":
+                        cargo_result[
+                            "classification"
+                        ],
+
+                    "CargoConfidence":
+                        cargo_result[
+                            "confidence"
+                        ],
+
+                    "ClassificationReason":
+                        cargo_result[
+                            "reason"
+                        ],
+
                     "Source":
                         "OpenSky + ADSBDB"
                 })
-
 
     # =====================================
     # WRITE CSV
@@ -449,6 +620,9 @@ def main():
         "ICAOType",
         "Operator",
         "OperatorCountry",
+        "CargoClassification",
+        "CargoConfidence",
+        "ClassificationReason",
         "Source"
     ]
 
